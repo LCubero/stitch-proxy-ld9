@@ -282,7 +282,7 @@ export class StitchCompatibilityProxy {
     this.#adapter = options.adapter;
     this.#server = new Server(
       options.serverInfo ?? {
-        name: 'stitch_proxy_ld9',
+        name: 'stitch-proxy-ld9',
         version: '0.1.0',
       },
       {

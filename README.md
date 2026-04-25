@@ -1,4 +1,4 @@
-# stitch_proxy_ld9
+# stitch-proxy-ld9
 
 Independent, experimental local MCP stdio compatibility proxy for Google Stitch.
 
@@ -41,8 +41,8 @@ Google Stitch APIs and SDKs are still experimental. Expect surface-area changes.
 
 ## Naming
 
-- MCP server name: `stitch_proxy_ld9`
-- Package name: `stitch_proxy_ld9`
+- MCP server name: `stitch-proxy-ld9`
+- Package name: `stitch-proxy-ld9`
 
 This package name remains valid for npm because unscoped names cannot **start** with `_`, but `_` is otherwise URL-safe and allowed in the name.
 
@@ -94,7 +94,7 @@ If you want to use a project-local OpenCode config for manual testing, copy it t
 ```json
 {
   "mcp": {
-    "stitch_proxy_ld9": {
+    "stitch-proxy-ld9": {
       "type": "local",
       "command": [
         "npx",
@@ -116,7 +116,7 @@ If you want to use a project-local OpenCode config for manual testing, copy it t
 ```json
 {
   "mcp": {
-    "stitch_proxy_ld9": {
+    "stitch-proxy-ld9": {
       "type": "local",
       "command": ["npx", "tsx", "/mnt/SSD/code/02-Proyectos/stitch_proxy/src/index.ts"],
       "environment": {
@@ -132,7 +132,7 @@ If you want to use a project-local OpenCode config for manual testing, copy it t
 ```json
 {
   "mcp": {
-    "stitch_proxy_ld9": {
+    "stitch-proxy-ld9": {
       "type": "local",
       "command": ["npx", "tsx", "/mnt/SSD/code/02-Proyectos/stitch_proxy/src/index.ts"],
       "environment": {
@@ -180,7 +180,7 @@ Use this server entry:
 ```json
 {
   "mcp": {
-    "stitch_proxy_ld9": {
+    "stitch-proxy-ld9": {
       "type": "local",
       "command": [
         "npx",
@@ -222,18 +222,18 @@ Then select your Kimi model from the model picker used by your OpenCode install.
 Use a direct prompt such as:
 
 ```text
-List the available MCP tools from stitch_proxy_ld9, then show the first tool name and summarize whether its input schema contains allOf wrappers around any $ref sibling definitions.
+List the available MCP tools from stitch-proxy-ld9, then show the first tool name and summarize whether its input schema contains allOf wrappers around any $ref sibling definitions.
 ```
 
 If the upstream Stitch account has projects or workspaces exposed through its tools, a second useful prompt is:
 
 ```text
-Use stitch_proxy_ld9 to list available Stitch tools and identify any tool that can enumerate projects, files, or workspaces.
+Use stitch-proxy-ld9 to list available Stitch tools and identify any tool that can enumerate projects, files, or workspaces.
 ```
 
 ### 6) Expected success symptoms
 
-- OpenCode connects to `stitch_proxy_ld9` without failing during tool discovery.
+- OpenCode connects to `stitch-proxy-ld9` without failing during tool discovery.
 - The proxy process stays alive instead of exiting immediately.
 - Tool listing succeeds.
 - Kimi can inspect tool schemas without a JSON Schema validation failure.
@@ -261,7 +261,7 @@ Typical symptom patterns:
 
 What to check:
 
-1. Confirm OpenCode is pointed at `stitch_proxy_ld9`, not the upstream Stitch server directly.
+1. Confirm OpenCode is pointed at `stitch-proxy-ld9`, not the upstream Stitch server directly.
 2. Confirm the MCP command uses `npx tsx /mnt/SSD/code/02-Proyectos/stitch_proxy/src/index.ts`.
 3. Confirm `STITCH_API_KEY` is exported in the SAME shell/session that launches OpenCode.
 4. Confirm dependencies were installed in this repo with `npm install`.

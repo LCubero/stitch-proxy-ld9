@@ -8,7 +8,7 @@ import {
 } from './proxy.js';
 
 const SERVER_INFO = {
-  name: 'stitch_proxy_ld9',
+  name: 'stitch-proxy-ld9',
   version: '0.1.0',
 };
 
