@@ -109,8 +109,9 @@ export class StdioMcpServer {
       try {
         const message = JSON.parse(line) as JsonRpcRequest;
         void this.#handleMessage(message);
-      } catch {
-        // Ignore malformed JSON
+      } catch (err) {
+        // Ignore malformed JSON, but log for debugging
+        console.error('Stitch MCP: failed to parse message on stdin:', err instanceof Error ? err.message : String(err));
       }
     }
   }

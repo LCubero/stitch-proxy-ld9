@@ -79,7 +79,7 @@ export class StitchHttpClient {
     // Send initialized notification (no response expected)
     await this.#sendNotification('notifications/initialized', {});
 
-    if (!result) {
+    if (result === undefined) {
       throw new Error('Failed to initialize MCP session with Stitch');
     }
   }
