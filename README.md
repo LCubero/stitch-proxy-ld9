@@ -1,6 +1,6 @@
 # stitch-proxy-ld9
 
-Independent MCP compatibility proxy for Google Stitch. Normalizes JSON Schema patterns that break Moonshot Kimi and other strict Draft 7 clients.
+Zero-dependency MCP compatibility proxy for Google Stitch. Normalizes JSON Schema patterns that break Moonshot Kimi and other strict Draft 7 clients.
 
 ## The problem
 

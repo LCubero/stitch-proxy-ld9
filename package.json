@@ -1,7 +1,7 @@
 {
   "name": "stitch-proxy-ld9",
-  "version": "0.1.0",
-  "description": "Local MCP stdio compatibility proxy for Google Stitch, normalizing JSON Schema for OpenCode and Kimi-compatible clients.",
+  "version": "0.2.0",
+  "description": "Zero-dependency MCP stdio compatibility proxy for Google Stitch. Normalizes JSON Schema for Kimi/Moonshot Draft 7 clients.",
   "type": "module",
   "bin": {
     "stitch-proxy-ld9": "./dist/index.js"
@@ -30,10 +30,7 @@
   "engines": {
     "node": ">=20.11"
   },
-  "dependencies": {
-    "@google/stitch-sdk": "0.1.0",
-    "@modelcontextprotocol/sdk": "1.29.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "25.6.0",
     "tsx": "4.21.0",

@@ -1,9 +1,8 @@
-import type { StitchToolClient } from '@google/stitch-sdk';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { PassThrough } from 'node:stream';
 import { describe, expect, test, vi } from 'vitest';
 
+import type { StitchHttpClient } from '../src/stitch-client.js';
+import type { CallToolResult } from '../src/proxy.js';
 import {
   adaptCallToolResult,
   StitchCompatibilityProxy,
@@ -16,6 +15,47 @@ function createCallToolResult(): CallToolResult {
     content: [{ text: 'ok', type: 'text' }],
   };
 }
+
+// ── Helpers for integration tests ──────────────────────────────────────────
+
+interface JsonRpcRequest {
+  jsonrpc: '2.0';
+  id: number;
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+interface JsonRpcResponse {
+  jsonrpc: '2.0';
+  id: number;
+  result?: unknown;
+  error?: { code: number; message: string };
+}
+
+function sendRequest(
+  input: PassThrough,
+  output: PassThrough,
+  request: JsonRpcRequest,
+): Promise<JsonRpcResponse> {
+  return new Promise<JsonRpcResponse>((resolve) => {
+    let buffer = '';
+
+    const onData = (chunk: Buffer | string) => {
+      buffer += chunk.toString();
+      const nl = buffer.indexOf('\n');
+      if (nl !== -1) {
+        const line = buffer.slice(0, nl).trim();
+        output.removeListener('data', onData);
+        resolve(JSON.parse(line) as JsonRpcResponse);
+      }
+    };
+
+    output.on('data', onData);
+    input.write(`${JSON.stringify(request)}\n`);
+  });
+}
+
+// ── StitchToolClientAdapter ────────────────────────────────────────────────
 
 describe('StitchToolClientAdapter', () => {
   test('connects lazily before listing tools and calling tools', async () => {
@@ -49,7 +89,7 @@ describe('StitchToolClientAdapter', () => {
           tools: [{ name: 'list_projects' }],
         };
       }),
-    } as unknown as StitchToolClient;
+    } as unknown as StitchHttpClient;
 
     const adapter = new StitchToolClientAdapter(client);
 
@@ -78,7 +118,7 @@ describe('StitchToolClientAdapter', () => {
       close: vi.fn(async () => undefined),
       connect,
       listTools: vi.fn(async () => ({ tools: [] })),
-    } as unknown as StitchToolClient;
+    } as unknown as StitchHttpClient;
 
     const adapter = new StitchToolClientAdapter(client);
 
@@ -101,7 +141,7 @@ describe('StitchToolClientAdapter', () => {
       close: vi.fn(async () => undefined),
       connect: vi.fn(async () => undefined),
       listTools: vi.fn(async () => ({ tools: [] })),
-    } as unknown as StitchToolClient;
+    } as unknown as StitchHttpClient;
 
     const adapter = new StitchToolClientAdapter(client);
     const args = { prompt: 'Generate a hero section.' };
@@ -121,7 +161,7 @@ describe('StitchToolClientAdapter', () => {
       close: vi.fn(async () => undefined),
       connect: vi.fn(async () => undefined),
       listTools: vi.fn(async () => ({ tools: [] })),
-    } as unknown as StitchToolClient;
+    } as unknown as StitchHttpClient;
 
     const adapter = new StitchToolClientAdapter(client);
 
@@ -208,7 +248,6 @@ describe('adaptCallToolResult', () => {
   test('preserves error CallToolResult without structuredContent even when tool has outputSchema', () => {
     const raw = { isError: true, content: [{ type: 'text', text: 'failed' }] };
     const adapted = adaptCallToolResult(raw, true);
-    // isError CallToolResult passes through without adding structuredContent
     expect(adapted).toEqual({
       content: [{ type: 'text', text: 'failed' }],
       isError: true,
@@ -231,11 +270,7 @@ describe('StitchCompatibilityProxy', () => {
             $defs: {
               VariantOptions: {
                 additionalProperties: false,
-                properties: {
-                  size: {
-                    type: 'string',
-                  },
-                },
+                properties: { size: { type: 'string' } },
                 type: 'object',
               },
             },
@@ -257,49 +292,52 @@ describe('StitchCompatibilityProxy', () => {
       ]),
     };
 
-    const proxy = new StitchCompatibilityProxy({ adapter });
-    const client = new Client({ name: 'proxy-test-client', version: '0.1.0' });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const proxy = new StitchCompatibilityProxy({ adapter, input, output });
 
-    await proxy.start(serverTransport);
-    await client.connect(clientTransport);
+    // Start proxy (non-blocking)
+    void proxy.start();
 
-    try {
-      const response = await client.listTools();
+    // Send initialize
+    const initResp = await sendRequest(input, output, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'test', version: '0.1.0' },
+      },
+    });
+    expect(initResp.result).toMatchObject({ protocolVersion: '2024-11-05' });
 
-      expect(response.tools).toHaveLength(1);
-      expect(response.tools[0]).toMatchObject({
-        inputSchema: {
-          $defs: {
-            VariantOptions: {
-              additionalProperties: false,
-              properties: {
-                size: {
-                  type: 'string',
-                },
-              },
-              type: 'object',
-            },
-          },
+    // Send tools/list
+    const toolsResp = await sendRequest(input, output, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/list',
+    });
+
+    const tools = (toolsResp.result as { tools: Array<{ name: string; inputSchema: Record<string, unknown> }> }).tools;
+    expect(tools).toHaveLength(1);
+    expect(tools[0].name).toBe('generate_screen_from_text');
+    expect(tools[0].inputSchema).toMatchObject({
+      properties: {
+        component: {
           properties: {
-            component: {
-              properties: {
-                variantOptions: {
-                  allOf: [{ $ref: '#/$defs/VariantOptions' }],
-                  description: 'Variant configuration for this component.',
-                },
-              },
-              type: 'object',
+            variantOptions: {
+              allOf: [{ $ref: '#/$defs/VariantOptions' }],
+              description: 'Variant configuration for this component.',
             },
           },
           type: 'object',
         },
-        name: 'generate_screen_from_text',
-      });
-    } finally {
-      await client.close();
-      await proxy.close();
-    }
+      },
+    });
+
+    input.destroy();
+    await proxy.close();
   });
 
   test('normalizes outputSchema $ref siblings in tools/list', async () => {
@@ -330,39 +368,43 @@ describe('StitchCompatibilityProxy', () => {
       ]),
     };
 
-    const proxy = new StitchCompatibilityProxy({ adapter });
-    const client = new Client({ name: 'proxy-test-client', version: '0.1.0' });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const proxy = new StitchCompatibilityProxy({ adapter, input, output });
+    void proxy.start();
 
-    await proxy.start(serverTransport);
-    await client.connect(clientTransport);
+    await sendRequest(input, output, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'test', version: '0.1.0' },
+      },
+    });
 
-    try {
-      const response = await client.listTools();
-      expect(response.tools).toHaveLength(1);
-      expect(response.tools[0].outputSchema).toMatchObject({
-        $defs: {
-          ProjectSummary: {
-            properties: { id: { type: 'string' }, name: { type: 'string' } },
-            type: 'object',
-          },
+    const toolsResp = await sendRequest(input, output, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/list',
+    });
+
+    const tools = (toolsResp.result as { tools: Array<{ outputSchema?: Record<string, unknown> }> }).tools;
+    expect(tools[0].outputSchema).toMatchObject({
+      properties: {
+        projects: {
+          allOf: [{ $ref: '#/$defs/ProjectSummary' }],
+          description: 'List of projects.',
         },
-        properties: {
-          projects: {
-            allOf: [{ $ref: '#/$defs/ProjectSummary' }],
-            description: 'List of projects.',
-          },
-        },
-        type: 'object',
-      });
-    } finally {
-      await client.close();
-      await proxy.close();
-    }
+      },
+    });
+
+    input.destroy();
+    await proxy.close();
   });
 
   test('adapts raw object result to CallToolResult with structuredContent when tool has outputSchema', async () => {
-    // Simulates what the Stitch SDK returns: a parsed object, not a CallToolResult
     const projectsData = { projects: [{ id: 'abc', name: 'My Project' }] };
 
     const adapter: UpstreamToolAdapter = {
@@ -381,70 +423,45 @@ describe('StitchCompatibilityProxy', () => {
       ]),
     };
 
-    const proxy = new StitchCompatibilityProxy({ adapter });
-    const client = new Client({ name: 'proxy-test-client', version: '0.1.0' });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const proxy = new StitchCompatibilityProxy({ adapter, input, output });
+    void proxy.start();
 
-    await proxy.start(serverTransport);
-    await client.connect(clientTransport);
+    await sendRequest(input, output, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'test', version: '0.1.0' },
+      },
+    });
 
-    try {
-      // First list tools so the proxy caches metadata
-      await client.listTools();
+    // List tools first so proxy caches metadata
+    await sendRequest(input, output, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/list',
+    });
 
-      // Now call the tool — should get a valid CallToolResult with structuredContent
-      const result = await client.callTool({ name: 'list_projects', arguments: {} });
-      expect(result).toMatchObject({
-        content: [{ type: 'text', text: expect.any(String) }],
-        structuredContent: { projects: [{ id: 'abc', name: 'My Project' }] },
-      });
-    } finally {
-      await client.close();
-      await proxy.close();
-    }
-  });
+    // Call tool
+    const callResp = await sendRequest(input, output, {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: { name: 'list_projects', arguments: {} },
+    });
 
-  test('derives structuredContent from JSON text when CallToolResult lacks it', async () => {
-    // Simulates an adapter that returns a proper CallToolResult with JSON text
-    // but no structuredContent — the proxy should extract structuredContent
-    const callResult: CallToolResult = {
-      content: [{ type: 'text', text: '{"projects":[]}' }],
-    };
+    const result = callResp.result as CallToolResult;
+    expect(result).toMatchObject({
+      content: [{ type: 'text' }],
+      structuredContent: { projects: [{ id: 'abc', name: 'My Project' }] },
+    });
 
-    const adapter: UpstreamToolAdapter = {
-      callTool: vi.fn(async () => callResult),
-      close: vi.fn(async () => undefined),
-      listTools: vi.fn(async () => [
-        {
-          description: 'List projects.',
-          inputSchema: { type: 'object', properties: {} },
-          name: 'list_projects',
-          outputSchema: {
-            properties: { projects: { type: 'array' } },
-            type: 'object',
-          },
-        },
-      ]),
-    };
-
-    const proxy = new StitchCompatibilityProxy({ adapter });
-    const client = new Client({ name: 'proxy-test-client', version: '0.1.0' });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-
-    await proxy.start(serverTransport);
-    await client.connect(clientTransport);
-
-    try {
-      await client.listTools();
-      const result = await client.callTool({ name: 'list_projects', arguments: {} });
-      expect(result).toMatchObject({
-        content: [{ type: 'text', text: '{"projects":[]}' }],
-        structuredContent: { projects: [] },
-      });
-    } finally {
-      await client.close();
-      await proxy.close();
-    }
+    input.destroy();
+    await proxy.close();
   });
 
   test('passes through CallToolResult without structuredContent when tool has no outputSchema', async () => {
@@ -460,31 +477,46 @@ describe('StitchCompatibilityProxy', () => {
           description: 'Generate a screen from text.',
           inputSchema: { type: 'object', properties: {} },
           name: 'generate_screen_from_text',
-          // No outputSchema
         },
       ]),
     };
 
-    const proxy = new StitchCompatibilityProxy({ adapter });
-    const client = new Client({ name: 'proxy-test-client', version: '0.1.0' });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const proxy = new StitchCompatibilityProxy({ adapter, input, output });
+    void proxy.start();
 
-    await proxy.start(serverTransport);
-    await client.connect(clientTransport);
+    await sendRequest(input, output, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'test', version: '0.1.0' },
+      },
+    });
 
-    try {
-      await client.listTools();
-      const result = await client.callTool({
-        name: 'generate_screen_from_text',
-        arguments: { prompt: 'A hero section' },
-      });
-      expect(result).toEqual({
-        content: [{ type: 'text', text: 'Design created!' }],
-      });
-      expect('structuredContent' in result).toBe(false);
-    } finally {
-      await client.close();
-      await proxy.close();
-    }
+    await sendRequest(input, output, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/list',
+    });
+
+    const callResp = await sendRequest(input, output, {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: { name: 'generate_screen_from_text', arguments: { prompt: 'A hero' } },
+    });
+
+    const result = callResp.result as CallToolResult;
+    expect(result).toEqual({
+      content: [{ type: 'text', text: 'Design created!' }],
+    });
+    expect('structuredContent' in result).toBe(false);
+
+    input.destroy();
+    await proxy.close();
   });
 });

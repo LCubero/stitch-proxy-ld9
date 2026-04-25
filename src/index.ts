@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-
 import {
   StitchCompatibilityProxy,
   StitchToolClientAdapter,
@@ -34,7 +32,7 @@ async function main(): Promise<void> {
     void shutdown('SIGTERM');
   });
 
-  await proxy.start(new StdioServerTransport());
+  await proxy.start();
   console.error(`${SERVER_INFO.name}: ready on stdio.`);
 }
 

@@ -1,11 +1,21 @@
-import { StitchToolClient } from '@google/stitch-sdk';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { Readable, Writable } from 'node:stream';
 
+import { StitchHttpClient, type StitchClientConfig } from './stitch-client.js';
+import { StdioMcpServer } from './mcp-stdio.js';
 import { normalizeJsonSchema } from './schema-normalizer.js';
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+export interface ContentBlock {
+  type: 'text';
+  text: string;
+}
+
+export interface CallToolResult {
+  content: ContentBlock[];
+  isError?: boolean;
+  structuredContent?: Record<string, unknown>;
+}
 
 export interface UpstreamTool {
   annotations?: Record<string, unknown>;
@@ -50,6 +60,8 @@ export interface StitchCompatibilityProxyOptions {
     name: string;
     version: string;
   };
+  input?: Readable;
+  output?: Writable;
 }
 
 const DEFAULT_EMPTY_INPUT_SCHEMA = {
@@ -58,17 +70,11 @@ const DEFAULT_EMPTY_INPUT_SCHEMA = {
   type: 'object',
 } as const;
 
-interface StitchToolClientLike {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  callTool(name: string, args?: Record<string, unknown>): Promise<any>;
-  close(): Promise<void>;
-  connect(): Promise<void>;
-  listTools(): Promise<{ tools: UpstreamTool[] }>;
-}
+// ── Stitch Client Factory ──────────────────────────────────────────────────
 
 export function createStitchClientFromEnv(
   env: StitchProxyEnvironment = process.env,
-): StitchToolClient {
+): StitchHttpClient {
   if (!env.STITCH_API_KEY && !env.STITCH_ACCESS_TOKEN) {
     throw new Error(
       'Missing Stitch credentials. Set STITCH_API_KEY or STITCH_ACCESS_TOKEN.',
@@ -81,7 +87,7 @@ export function createStitchClientFromEnv(
     );
   }
 
-  const config: Record<string, string> = {};
+  const config: StitchClientConfig = {};
 
   if (env.STITCH_API_KEY) {
     config.apiKey = env.STITCH_API_KEY;
@@ -99,16 +105,18 @@ export function createStitchClientFromEnv(
     config.baseUrl = env.STITCH_HOST;
   }
 
-  return new StitchToolClient(config);
+  return new StitchHttpClient(config);
 }
 
+// ── Stitch Client Adapter ──────────────────────────────────────────────────
+
 export class StitchToolClientAdapter implements UpstreamToolAdapter {
-  readonly #client: StitchToolClientLike;
+  readonly #client: StitchHttpClient;
   #connectPromise: Promise<void> | null = null;
   #connected = false;
 
-  constructor(client: StitchToolClient = createStitchClientFromEnv()) {
-    this.#client = client as StitchToolClientLike;
+  constructor(client?: StitchHttpClient) {
+    this.#client = client ?? createStitchClientFromEnv();
   }
 
   async #ensureConnected(): Promise<void> {
@@ -132,6 +140,8 @@ export class StitchToolClientAdapter implements UpstreamToolAdapter {
 
   async callTool(request: ToolCallRequest): Promise<unknown> {
     await this.#ensureConnected();
+    // HTTP client returns raw CallToolResult (with content array),
+    // unlike the SDK which strips the envelope via parseToolResponse.
     return this.#client.callTool(request.name, request.arguments);
   }
 
@@ -148,6 +158,8 @@ export class StitchToolClientAdapter implements UpstreamToolAdapter {
   }
 }
 
+// ── Schema Normalization ───────────────────────────────────────────────────
+
 function normalizeTool(tool: UpstreamTool): UpstreamTool {
   return {
     ...tool,
@@ -155,10 +167,15 @@ function normalizeTool(tool: UpstreamTool): UpstreamTool {
       tool.inputSchema ?? DEFAULT_EMPTY_INPUT_SCHEMA,
     ) as Record<string, unknown>,
     ...(tool.outputSchema && {
-      outputSchema: normalizeJsonSchema(tool.outputSchema) as Record<string, unknown>,
+      outputSchema: normalizeJsonSchema(tool.outputSchema) as Record<
+        string,
+        unknown
+      >,
     }),
   };
 }
+
+// ── CallTool Result Adaptation ─────────────────────────────────────────────
 
 /**
  * Type guard: checks whether `value` looks like a CallToolResult
@@ -184,7 +201,11 @@ function extractStructuredContentFromText(
     if (block.type === 'text') {
       try {
         const parsed: unknown = JSON.parse(block.text);
-        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        if (
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          !Array.isArray(parsed)
+        ) {
           return parsed as Record<string, unknown>;
         }
       } catch {
@@ -194,6 +215,18 @@ function extractStructuredContentFromText(
   }
 
   return undefined;
+}
+
+/**
+ * Heuristic check for error-like results from the Stitch SDK.
+ */
+function isErrorResult(value: unknown): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'isError' in value &&
+    (value as { isError: unknown }).isError === true
+  );
 }
 
 /**
@@ -213,12 +246,10 @@ export function adaptCallToolResult(
 ): CallToolResult {
   // ── Case 1: Already a valid CallToolResult ──────────────────────────
   if (isCallToolResult(raw)) {
-    // If structuredContent is already present, pass through unchanged
     if (raw.structuredContent) {
       return raw;
     }
 
-    // Tool has outputSchema — derive structuredContent from text content
     if (toolHasOutputSchema && !raw.isError) {
       const structuredContent = extractStructuredContentFromText(raw);
       if (structuredContent) {
@@ -258,46 +289,29 @@ export function adaptCallToolResult(
   };
 }
 
-/**
- * Heuristic check for error-like results from the Stitch SDK.
- * The SDK's parseToolResponse throws StitchError for isError results,
- * so this mainly guards against stray { isError: true } objects.
- */
-function isErrorResult(value: unknown): boolean {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'isError' in value &&
-    (value as { isError: unknown }).isError === true
-  );
-}
+// ── Proxy ──────────────────────────────────────────────────────────────────
 
 export class StitchCompatibilityProxy {
   readonly #adapter: UpstreamToolAdapter;
-  readonly #server: Server;
+  readonly #server: StdioMcpServer;
   /** Cache of tool definitions keyed by name, populated on listTools. */
   #toolCache = new Map<string, UpstreamTool>();
 
   constructor(options: StitchCompatibilityProxyOptions) {
     this.#adapter = options.adapter;
-    this.#server = new Server(
-      options.serverInfo ?? {
+    this.#server = new StdioMcpServer({
+      serverInfo: options.serverInfo ?? {
         name: 'stitch-proxy-ld9',
-        version: '0.1.0',
+        version: '0.2.0',
       },
-      {
-        capabilities: {
-          tools: {
-            listChanged: false,
-          },
-        },
-        instructions:
-          options.instructions ??
-          'Compatibility proxy that normalizes Stitch tool schemas and adapts callTool results for local MCP clients.',
-      },
-    );
+      instructions:
+        options.instructions ??
+        'Compatibility proxy that normalizes Stitch tool schemas and adapts callTool results for local MCP clients.',
+      input: options.input,
+      output: options.output,
+    });
 
-    this.#server.setRequestHandler(ListToolsRequestSchema, async () => {
+    this.#server.on('tools/list', async () => {
       const tools = await this.#adapter.listTools();
 
       // Refresh the tool cache so callTool knows which tools have outputSchema
@@ -311,15 +325,19 @@ export class StitchCompatibilityProxy {
       };
     });
 
-    this.#server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const toolName = request.params.name;
+    this.#server.on('tools/call', async (request) => {
+      const params = (request.params ?? {}) as Record<string, unknown>;
+      const toolName = params.name as string;
+      const args = params.arguments as Record<string, unknown> | undefined;
+
       const raw = await this.#adapter.callTool({
-        arguments: request.params.arguments as Record<string, unknown> | undefined,
+        arguments: args,
         name: toolName,
       });
 
       const cachedTool = this.#toolCache.get(toolName);
-      const toolHasOutputSchema = cachedTool != null && cachedTool.outputSchema != null;
+      const toolHasOutputSchema =
+        cachedTool != null && cachedTool.outputSchema != null;
 
       return adaptCallToolResult(raw, toolHasOutputSchema);
     });
@@ -327,10 +345,9 @@ export class StitchCompatibilityProxy {
 
   async close(): Promise<void> {
     await this.#adapter.close();
-    await this.#server.close();
   }
 
-  async start(transport: Transport = new StdioServerTransport()): Promise<void> {
-    await this.#server.connect(transport);
+  async start(): Promise<void> {
+    await this.#server.start();
   }
 }
