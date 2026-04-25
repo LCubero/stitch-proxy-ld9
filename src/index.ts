@@ -7,7 +7,7 @@ import {
 
 const SERVER_INFO = {
   name: 'stitch-proxy-ld9',
-  version: '0.2.0',
+  version: '0.2.1',
 };
 
 async function main(): Promise<void> {
