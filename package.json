@@ -1,6 +1,6 @@
 {
   "name": "stitch-proxy-ld9",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Zero-dependency MCP stdio compatibility proxy for Google Stitch. Normalizes JSON Schema for Kimi/Moonshot Draft 7 clients.",
   "type": "module",
   "bin": {
