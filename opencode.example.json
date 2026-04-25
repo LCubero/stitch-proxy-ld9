@@ -3,11 +3,7 @@
   "mcp": {
     "stitch-proxy-ld9": {
       "type": "local",
-      "command": [
-        "npx",
-        "tsx",
-        "/mnt/SSD/code/02-Proyectos/stitch_proxy/src/index.ts"
-      ],
+      "command": ["stitch-proxy-ld9"],
       "environment": {
         "STITCH_API_KEY": "{env:STITCH_API_KEY}"
       }

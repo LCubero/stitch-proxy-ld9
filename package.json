@@ -1,14 +1,31 @@
 {
   "name": "stitch-proxy-ld9",
   "version": "0.1.0",
-  "private": true,
   "description": "Local MCP stdio compatibility proxy for Google Stitch, normalizing JSON Schema for OpenCode and Kimi-compatible clients.",
   "type": "module",
+  "bin": {
+    "stitch-proxy-ld9": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "start": "tsx src/index.ts",
+    "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
   "engines": {
     "node": ">=20.11"
