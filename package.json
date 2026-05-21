@@ -2,6 +2,24 @@
   "name": "stitch-proxy-ld9",
   "version": "0.2.1",
   "description": "Zero-dependency MCP stdio compatibility proxy for Google Stitch. Normalizes JSON Schema for Kimi/Moonshot Draft 7 clients.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LCubero/stitch-proxy-ld9.git"
+  },
+  "bugs": {
+    "url": "https://github.com/LCubero/stitch-proxy-ld9/issues"
+  },
+  "homepage": "https://github.com/LCubero/stitch-proxy-ld9#readme",
+  "keywords": [
+    "mcp",
+    "stitch",
+    "google-stitch",
+    "opencode",
+    "kimi",
+    "moonshot",
+    "json-schema"
+  ],
   "type": "module",
   "bin": {
     "stitch-proxy-ld9": "./dist/index.js"
@@ -29,6 +47,10 @@
   },
   "engines": {
     "node": ">=20.11"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "dependencies": {},
   "devDependencies": {

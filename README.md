@@ -22,10 +22,10 @@ This is valid in modern JSON Schema, but Kimi/Moonshot rejects it. This proxy re
 npm install -g stitch-proxy-ld9
 ```
 
-Or use without installing:
+`npx` is convenient, but less safe because it can resolve, download, and execute a package in one step. Prefer the global install above for normal use. If you still use `npx`, pin the version and review the package first:
 
 ```bash
-npx -y stitch-proxy-ld9
+npx stitch-proxy-ld9@0.2.1
 ```
 
 ## Configure OpenCode
@@ -111,6 +111,28 @@ export STITCH_PROJECT_ID="your-google-cloud-project-id"
 export STITCH_HOST="https://stitch.googleapis.com/mcp"
 ```
 
+Only set `STITCH_HOST` to a host you trust. The proxy sends your configured `STITCH_API_KEY` or `STITCH_ACCESS_TOKEN` to this URL.
+
+## Supply-chain security
+
+This package follows npm supply-chain hardening practices inspired by [lirantal/npm-security-best-practices](https://github.com/lirantal/npm-security-best-practices/):
+
+- Zero runtime dependencies in `package.json`.
+- No consumer install hooks such as `preinstall`, `install`, or `postinstall`; only `prepublishOnly` is used by maintainers before publishing.
+- Authentication is read from environment variables at runtime, not from committed config files.
+- Published files are restricted with the `files` allowlist: `dist`, `README.md`, and `LICENSE`; npm also includes `package.json` automatically.
+- CI verifies typecheck, tests, production audit, and package contents with `npm pack --dry-run --ignore-scripts`.
+- The publish workflow is release-gated and prepared for npm provenance through GitHub Actions OIDC instead of a long-lived `NPM_TOKEN`; npm Trusted Publishing must be configured for this package in npmjs.com.
+- Failed upstream HTTP response bodies and JSON-RPC error messages are shortened or redacted before appearing in thrown errors.
+
+Recommended local practices:
+
+- Avoid blind `npx` execution. Prefer `npm install -g stitch-proxy-ld9` or inspect and pin the package version first.
+- Use `npm ci` for repository development so installs match `package-lock.json`.
+- Inspect package contents with `npm pack --dry-run --ignore-scripts` before publishing or auditing a release.
+- Do not commit plaintext secrets in config files. Prefer environment references such as `{env:STITCH_API_KEY}` in OpenCode config.
+- Review lockfile changes and avoid unreviewed dependency upgrades.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -144,7 +166,7 @@ OpenCode + Kimi
 - Intercepts `tools/list` and normalizes every `inputSchema`
 - Forwards `tools/call` unchanged
 - Handles `structuredContent` for tools with `outputSchema`
-- Uses env-only auth, no secrets logged
+- Uses env-only auth and redacts common secret patterns from upstream error messages
 
 ## Status
 

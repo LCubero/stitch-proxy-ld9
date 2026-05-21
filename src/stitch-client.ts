@@ -41,6 +41,22 @@ interface JsonRpcResponse {
 
 const DEFAULT_BASE_URL = 'https://stitch.googleapis.com/mcp';
 const DEFAULT_TIMEOUT = 30_000;
+const ERROR_BODY_PREVIEW_LIMIT = 500;
+
+function redactSecrets(text: string): string {
+  return text
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/g, '[REDACTED]')
+    .replace(
+      /\b(STITCH_API_KEY|STITCH_ACCESS_TOKEN|api[_-]?key|access[_-]?token|authorization|token|secret)\b\s*[:=]\s*["']?[^\s,"'}]+/gi,
+      '$1=[REDACTED]',
+    );
+}
+
+function formatHttpErrorBody(text: string, statusText: string): string {
+  const preview = text.trim().slice(0, ERROR_BODY_PREVIEW_LIMIT);
+  return redactSecrets(preview || statusText);
+}
 
 export class StitchHttpClient {
   readonly #baseUrl: string;
@@ -136,7 +152,7 @@ export class StitchHttpClient {
       if (!response.ok) {
         const text = await response.text().catch(() => '');
         throw new Error(
-          `Stitch MCP HTTP ${response.status}: ${text || response.statusText}`,
+          `Stitch MCP HTTP ${response.status}: ${formatHttpErrorBody(text, response.statusText)}`,
         );
       }
 
@@ -151,7 +167,7 @@ export class StitchHttpClient {
       const json = (await response.json()) as JsonRpcResponse;
       if (json.error) {
         throw new Error(
-          `Stitch MCP error ${json.error.code}: ${json.error.message}`,
+          `Stitch MCP error ${json.error.code}: ${redactSecrets(json.error.message)}`,
         );
       }
       return json.result;
@@ -203,7 +219,7 @@ export class StitchHttpClient {
         if (parsed.id === expectedId) {
           if (parsed.error) {
             throw new Error(
-              `Stitch MCP error ${parsed.error.code}: ${parsed.error.message}`,
+              `Stitch MCP error ${parsed.error.code}: ${redactSecrets(parsed.error.message)}`,
             );
           }
           return parsed.result;
